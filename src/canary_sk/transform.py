@@ -52,15 +52,20 @@ def split_cuts(cuts: list, dev_hours: float = 3.0, test_hours: float = 3.0, seed
     sessions = list(by_session.keys())
     rng.shuffle(sessions)
 
-    dev, test, train = [], [], []
+    train, dev, test = [], [], []
     dev_budget = dev_hours * 3600
     test_budget = test_hours * 3600
 
+    dev_running = 0.0
+    test_running = 0.0
     for s in sessions:
-        if sum(c.duration for c in dev) < dev_budget:
+        session_dur = sum(c.duration for c in by_session[s])
+        if dev_running < dev_budget:
             dev.extend(by_session[s])
-        elif sum(c.duration for c in test) < test_budget:
+            dev_running += session_dur
+        elif test_running < test_budget:
             test.extend(by_session[s])
+            test_running += session_dur
         else:
             train.extend(by_session[s])
 
