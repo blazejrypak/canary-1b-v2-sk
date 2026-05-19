@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from canary_sk.transform import is_valid, split_cuts, stratified_indices
+from canary_sk.transform import assign_splits, is_valid, split_cuts, stratified_indices
 
 
 # ---- is_valid ----
@@ -96,8 +96,6 @@ def test_split_dev_meets_budget():
 
 
 # ---- assign_splits ----
-
-from canary_sk.transform import assign_splits
 
 
 def _make_kept(n: int, duration: float = 10.0, prefix: str = "cut") -> dict:

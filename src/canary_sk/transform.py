@@ -44,7 +44,9 @@ def stratified_indices(rows_meta: list, target_hours: float, seed: int = 42) -> 
 
 
 def split_cuts(cuts: list, dev_hours: float = 3.0, test_hours: float = 3.0, seed: int = 42):
-    """Split cuts into train/dev/test by session hash to prevent data leakage."""
+    """Split cuts into train/dev/test by session hash to prevent data leakage.
+    Use assign_splits instead when split assignment must be computed before audio is loaded.
+    """
     rng = np.random.default_rng(seed)
     by_session: dict = defaultdict(list)
     for c in cuts:
@@ -85,6 +87,7 @@ def assign_splits(
     Sorts entries by MD5 hex of cut_id for a stable, reproducible ordering,
     then fills dev and test hour budgets before assigning the rest to train.
     Requires no audio data — safe to call after Pass 1.
+    Actual dev/test durations will exceed the budget by at most one clip's duration.
     """
     if not kept:
         return {}
