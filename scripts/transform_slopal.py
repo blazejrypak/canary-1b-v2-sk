@@ -20,9 +20,10 @@ Usage:
 """
 
 import argparse
+import json
 from pathlib import Path
 
-from datasets import load_dataset
+from datasets import Audio as HFAudio, load_dataset
 from lhotse.shar import SharWriter
 
 from canary_sk.transform import assign_splits, row_to_cut, stratified_indices
@@ -37,6 +38,10 @@ def _stream_dataset(hf_cache: str | None, columns: list[str] | None = None):
     )
     if columns:
         ds = ds.select_columns(columns)
+    else:
+        # Prevent datasets from auto-decoding audio (requires torchcodec in >=3.x).
+        # row_to_cut decodes raw bytes via soundfile instead.
+        ds = ds.cast_column("audio", HFAudio(decode=False))
     return ds
 
 
@@ -61,55 +66,75 @@ def main():
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
+    checkpoint = out / "pass1_checkpoint.json"
+
     # ------------------------------------------------------------------
     # Pass 1: stream metadata only — parquet skips the audio column.
-    # Collect rows_meta for stratified sampling and id_list for split
-    # assignment. Both are small: ~21 MB for 350k rows.
+    # Results are checkpointed to disk so a Pass 2 crash doesn't require
+    # re-streaming 1 h of metadata on the next run.
     # ------------------------------------------------------------------
-    print(">>> Pass 1: streaming metadata (audio column skipped)...")
-    rows_meta: list[dict] = []
-    id_list: list[str] = []
-    for i, row in enumerate(_stream_dataset(args.hf_cache, columns=["id", "snapshot", "duration", "text"])):
-        rows_meta.append({"snapshot": row["snapshot"], "duration": row["duration"]})
-        id_list.append(row["id"])
-        if (i + 1) % 50_000 == 0:
-            hrs = sum(r["duration"] for r in rows_meta) / 3600
-            print(f"    {i + 1:,} rows scanned ({hrs:.0f} h accumulated)...")
-
-    total = len(rows_meta)
-    total_hrs = sum(r["duration"] for r in rows_meta) / 3600
-    print(f"    {total:,} segments found ({total_hrs:.0f} h total).")
-
-    if args.target_hours > 0:
-        print(f">>> Stratified sampling for ~{args.target_hours} h...")
-        keep = stratified_indices(rows_meta, args.target_hours)
-        print(f"    Selected {len(keep):,} / {total:,} segments ({len(keep) / total * 100:.1f}%).")
+    if checkpoint.exists():
+        print(f">>> Pass 1: loading checkpoint from {checkpoint} (skipping re-stream)...")
+        ckpt = json.loads(checkpoint.read_text())
+        split_assignment = {int(k): v for k, v in ckpt["split_assignment"].items()}
+        total = ckpt["total"]
+        print(f"    {total:,} segments, {len(split_assignment):,} selected.")
+        split_counts = {"train": 0, "dev": 0, "test": 0}
+        split_hours = {"train": 0.0, "dev": 0.0, "test": 0.0}
+        for idx_str, split in ckpt["split_assignment"].items():
+            split_counts[split] += 1
+            split_hours[split] += ckpt["kept_durations"][idx_str]
+        print(f"    train={split_counts['train']:,} ({split_hours['train'] / 3600:.1f} h)  "
+              f"dev={split_counts['dev']:,} ({split_hours['dev'] / 3600:.1f} h)  "
+              f"test={split_counts['test']:,} ({split_hours['test'] / 3600:.1f} h)")
     else:
-        keep = None
-        print(">>> Using full dataset (no sampling).")
+        print(">>> Pass 1: streaming metadata (audio column skipped)...")
+        rows_meta: list[dict] = []
+        id_list: list[str] = []
+        for i, row in enumerate(_stream_dataset(args.hf_cache, columns=["id", "snapshot", "duration", "text"])):
+            rows_meta.append({"snapshot": row["snapshot"], "duration": row["duration"]})
+            id_list.append(row["id"])
+            if (i + 1) % 50_000 == 0:
+                hrs = sum(r["duration"] for r in rows_meta) / 3600
+                print(f"    {i + 1:,} rows scanned ({hrs:.0f} h accumulated)...")
 
-    # ------------------------------------------------------------------
-    # Pre-compute split assignment from IDs and durations only (no audio).
-    # assign_splits sorts by MD5 hash of cut_id for a stable ordering, then
-    # fills dev and test budgets before assigning the rest to train.
-    # ------------------------------------------------------------------
-    print(">>> Computing train/dev/test assignment...")
-    kept_ids: dict = {}
-    indices = keep if keep is not None else range(total)
-    for idx in indices:
-        cut_id = f"slopal_{id_list[idx]}"
-        kept_ids[idx] = (cut_id, rows_meta[idx]["duration"])
+        total = len(rows_meta)
+        total_hrs = sum(r["duration"] for r in rows_meta) / 3600
+        print(f"    {total:,} segments found ({total_hrs:.0f} h total).")
 
-    split_assignment = assign_splits(kept_ids, dev_hours=args.dev_hours, test_hours=args.test_hours)
+        if args.target_hours > 0:
+            print(f">>> Stratified sampling for ~{args.target_hours} h...")
+            keep = stratified_indices(rows_meta, args.target_hours)
+            print(f"    Selected {len(keep):,} / {total:,} segments ({len(keep) / total * 100:.1f}%).")
+        else:
+            keep = None
+            print(">>> Using full dataset (no sampling).")
 
-    split_counts = {"train": 0, "dev": 0, "test": 0}
-    split_hours = {"train": 0.0, "dev": 0.0, "test": 0.0}
-    for idx, split in split_assignment.items():
-        split_counts[split] += 1
-        split_hours[split] += kept_ids[idx][1]
-    print(f"    train={split_counts['train']:,} ({split_hours['train'] / 3600:.1f} h)  "
-          f"dev={split_counts['dev']:,} ({split_hours['dev'] / 3600:.1f} h)  "
-          f"test={split_counts['test']:,} ({split_hours['test'] / 3600:.1f} h)")
+        print(">>> Computing train/dev/test assignment...")
+        kept_ids: dict = {}
+        indices = keep if keep is not None else range(total)
+        for idx in indices:
+            cut_id = f"slopal_{id_list[idx]}"
+            kept_ids[idx] = (cut_id, rows_meta[idx]["duration"])
+
+        split_assignment = assign_splits(kept_ids, dev_hours=args.dev_hours, test_hours=args.test_hours)
+
+        split_counts = {"train": 0, "dev": 0, "test": 0}
+        split_hours = {"train": 0.0, "dev": 0.0, "test": 0.0}
+        for idx, split in split_assignment.items():
+            split_counts[split] += 1
+            split_hours[split] += kept_ids[idx][1]
+        print(f"    train={split_counts['train']:,} ({split_hours['train'] / 3600:.1f} h)  "
+              f"dev={split_counts['dev']:,} ({split_hours['dev'] / 3600:.1f} h)  "
+              f"test={split_counts['test']:,} ({split_hours['test'] / 3600:.1f} h)")
+
+        checkpoint.write_text(json.dumps({
+            "total": total,
+            "target_hours": args.target_hours,
+            "split_assignment": {str(k): v for k, v in split_assignment.items()},
+            "kept_durations": {str(idx): kept_ids[idx][1] for idx in split_assignment},
+        }))
+        print(f"    Checkpoint saved → {checkpoint}")
 
     # ------------------------------------------------------------------
     # Pass 2: stream all columns, decode audio only for selected rows.

@@ -1,7 +1,9 @@
 import hashlib
+import io
 from collections import defaultdict
 
 import numpy as np
+import soundfile as sf
 
 from canary_sk.normalize import normalize_text
 
@@ -113,8 +115,13 @@ def row_to_cut(row: dict):
     # Lhotse imported lazily — not available in the Mac dev environment
     from lhotse import MonoCut, Recording, SupervisionSegment
 
-    audio_array = np.asarray(row["audio"]["array"], dtype=np.float32)
-    sr = int(row["audio"]["sampling_rate"])
+    audio_info = row["audio"]
+    if "array" in audio_info and audio_info["array"] is not None:
+        audio_array = np.asarray(audio_info["array"], dtype=np.float32)
+        sr = int(audio_info["sampling_rate"])
+    else:
+        raw = audio_info.get("bytes") or open(audio_info["path"], "rb").read()
+        audio_array, sr = sf.read(io.BytesIO(raw), dtype="float32", always_2d=False)
     duration = len(audio_array) / sr  # actual duration from array, not metadata field
 
     text = normalize_text(row["text"])
