@@ -74,6 +74,37 @@ def split_cuts(cuts: list, dev_hours: float = 3.0, test_hours: float = 3.0, seed
     return train, dev, test
 
 
+def assign_splits(
+    kept: dict,
+    dev_hours: float = 3.0,
+    test_hours: float = 3.0,
+) -> dict:
+    """
+    Pre-compute {idx: split_name} using only cut IDs and durations.
+
+    Sorts entries by MD5 hex of cut_id for a stable, reproducible ordering,
+    then fills dev and test hour budgets before assigning the rest to train.
+    Requires no audio data — safe to call after Pass 1.
+    """
+    if not kept:
+        return {}
+    dev_budget = dev_hours * 3600
+    test_budget = test_hours * 3600
+    ordered = sorted(kept.items(), key=lambda kv: hashlib.md5(kv[1][0].encode()).hexdigest())
+    result: dict = {}
+    dev_s = test_s = 0.0
+    for idx, (cut_id, dur) in ordered:
+        if dev_s < dev_budget:
+            result[idx] = "dev"
+            dev_s += dur
+        elif test_s < test_budget:
+            result[idx] = "test"
+            test_s += dur
+        else:
+            result[idx] = "train"
+    return result
+
+
 def row_to_cut(row: dict):
     """Convert a SloPalSpeech HF dataset row to a Lhotse MonoCut. Returns None if invalid."""
     # Lhotse imported lazily — not available in the Mac dev environment

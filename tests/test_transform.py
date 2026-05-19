@@ -93,3 +93,67 @@ def test_split_dev_meets_budget():
     train, dev, test = split_cuts(cuts, dev_hours=1.0, test_hours=1.0)
     dev_dur = sum(c.duration for c in dev)
     assert dev_dur >= 3600.0
+
+
+# ---- assign_splits ----
+
+from canary_sk.transform import assign_splits
+
+
+def _make_kept(n: int, duration: float = 10.0, prefix: str = "cut") -> dict:
+    """Helper: {idx: (cut_id, duration)} for n cuts."""
+    return {i: (f"slopal_{prefix}_{i:05d}", duration) for i in range(n)}
+
+
+def test_assign_splits_empty():
+    assert assign_splits({}) == {}
+
+
+def test_assign_splits_all_indices_present():
+    kept = _make_kept(50)
+    result = assign_splits(kept, dev_hours=0.05, test_hours=0.05)
+    assert set(result.keys()) == set(kept.keys())
+
+
+def test_assign_splits_valid_split_names():
+    kept = _make_kept(50)
+    result = assign_splits(kept, dev_hours=0.05, test_hours=0.05)
+    assert set(result.values()) <= {"train", "dev", "test"}
+
+
+def test_assign_splits_no_overlap():
+    kept = _make_kept(200, duration=10.0)
+    result = assign_splits(kept, dev_hours=0.1, test_hours=0.1)
+    by_split = {"train": set(), "dev": set(), "test": set()}
+    for idx, split in result.items():
+        by_split[split].add(idx)
+    assert by_split["train"].isdisjoint(by_split["dev"])
+    assert by_split["train"].isdisjoint(by_split["test"])
+    assert by_split["dev"].isdisjoint(by_split["test"])
+
+
+def test_assign_splits_dev_meets_budget():
+    kept = _make_kept(500, duration=10.0)  # 5000s total
+    result = assign_splits(kept, dev_hours=1.0, test_hours=1.0)
+    dev_dur = sum(kept[i][1] for i, s in result.items() if s == "dev")
+    assert dev_dur >= 3600.0
+
+
+def test_assign_splits_test_meets_budget():
+    kept = _make_kept(1000, duration=10.0)  # 10000s total — enough for dev+test at 1h each
+    result = assign_splits(kept, dev_hours=1.0, test_hours=1.0)
+    test_dur = sum(kept[i][1] for i, s in result.items() if s == "test")
+    assert test_dur >= 3600.0
+
+
+def test_assign_splits_deterministic():
+    kept = _make_kept(100)
+    r1 = assign_splits(kept, dev_hours=0.1, test_hours=0.1)
+    r2 = assign_splits(kept, dev_hours=0.1, test_hours=0.1)
+    assert r1 == r2
+
+
+def test_assign_splits_large_budget_puts_all_in_dev():
+    kept = _make_kept(10, duration=5.0)  # 50s total
+    result = assign_splits(kept, dev_hours=999.0, test_hours=0.0)
+    assert all(s == "dev" for s in result.values())
