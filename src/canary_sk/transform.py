@@ -3,7 +3,6 @@ import io
 from collections import defaultdict
 
 import numpy as np
-import soundfile as sf
 
 from canary_sk.normalize import normalize_text
 
@@ -120,8 +119,10 @@ def row_to_cut(row: dict):
         audio_array = np.asarray(audio_info["array"], dtype=np.float32)
         sr = int(audio_info["sampling_rate"])
     else:
+        import torchaudio
         raw = audio_info.get("bytes") or open(audio_info["path"], "rb").read()
-        audio_array, sr = sf.read(io.BytesIO(raw), dtype="float32", always_2d=False)
+        waveform, sr = torchaudio.load(io.BytesIO(raw))
+        audio_array = waveform.mean(dim=0).numpy().astype(np.float32)
     duration = len(audio_array) / sr  # actual duration from array, not metadata field
 
     text = normalize_text(row["text"])
