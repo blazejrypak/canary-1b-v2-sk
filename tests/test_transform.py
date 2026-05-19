@@ -1,6 +1,8 @@
+import sys
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
-from canary_sk.transform import assign_splits, is_valid, split_cuts, stratified_indices
+from canary_sk.transform import assign_splits, is_valid, row_to_cut, split_cuts, stratified_indices
 
 
 # ---- is_valid ----
@@ -155,3 +157,40 @@ def test_assign_splits_large_budget_puts_all_in_dev():
     kept = _make_kept(10, duration=5.0)  # 50s total
     result = assign_splits(kept, dev_hours=999.0, test_hours=0.0)
     assert all(s == "dev" for s in result.values())
+
+
+# ---- row_to_cut duration ----
+
+
+def _mock_lhotse():
+    mock = MagicMock()
+    mock.MonoCut.return_value = MagicMock()
+    mock.Recording.from_array.return_value = MagicMock()
+    mock.SupervisionSegment.return_value = MagicMock()
+    return mock
+
+
+def test_row_to_cut_uses_actual_duration_not_metadata():
+    """Metadata says 0.5s (invalid), but actual array is 10.0s (valid) → cut produced."""
+    with patch.dict(sys.modules, {"lhotse": _mock_lhotse()}):
+        row = {
+            "id": "test_001",
+            "text": "Testovacia veta pre parlamentný prejav",   # 38 chars, ~3.8 cps at 10s
+            "duration": 0.5,                                   # metadata: too short
+            "audio": {"array": [0.0] * 160_000, "sampling_rate": 16_000},  # actual: 10.0s
+        }
+        result = row_to_cut(row)
+        assert result is not None
+
+
+def test_row_to_cut_rejects_on_actual_duration():
+    """Metadata says 10.0s (valid), but actual array is 0.5s (invalid) → None."""
+    with patch.dict(sys.modules, {"lhotse": _mock_lhotse()}):
+        row = {
+            "id": "test_002",
+            "text": "Testovacia veta pre parlamentný prejav",
+            "duration": 10.0,                                  # metadata: fine
+            "audio": {"array": [0.0] * 8_000, "sampling_rate": 16_000},    # actual: 0.5s
+        }
+        result = row_to_cut(row)
+        assert result is None

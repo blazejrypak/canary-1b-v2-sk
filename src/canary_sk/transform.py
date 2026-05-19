@@ -113,13 +113,14 @@ def row_to_cut(row: dict):
     # Lhotse imported lazily — not available in the Mac dev environment
     from lhotse import MonoCut, Recording, SupervisionSegment
 
+    audio_array = np.asarray(row["audio"]["array"], dtype=np.float32)
+    sr = int(row["audio"]["sampling_rate"])
+    duration = len(audio_array) / sr  # actual duration from array, not metadata field
+
     text = normalize_text(row["text"])
-    duration = float(row["duration"])
     if not is_valid(duration, text):
         return None
 
-    audio_array = np.asarray(row["audio"]["array"], dtype=np.float32)
-    sr = int(row["audio"]["sampling_rate"])
     cut_id = f"slopal_{row['id']}"
 
     recording = Recording.from_array(audio_array, sampling_rate=sr, recording_id=cut_id)
