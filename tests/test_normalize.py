@@ -16,7 +16,7 @@ def test_normalize_text_nfc():
 
 
 def test_normalize_text_nbsp():
-    assert normalize_text("hello world") == "hello world"
+    assert normalize_text("hello world") == "hello world"
 
 
 def test_normalize_for_wer_lowercase():
