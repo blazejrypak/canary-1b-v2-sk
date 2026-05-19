@@ -60,7 +60,7 @@ trainer:
   devices: 1
   accelerator: gpu
   precision: bf16-mixed          # A100/H100. Na starších GPU použi 16-mixed.
-  max_steps: 15000               # ~2-3 epochy na 500 hod pri batch_duration=360
+  max_steps: 5000                # ~5 epochy na 100 hod pri batch_duration=360; bolo 15000 pre 500 hod
   log_every_n_steps: 50
   val_check_interval: 1000       # validate každých 1000 stepov
   check_val_every_n_epoch: null

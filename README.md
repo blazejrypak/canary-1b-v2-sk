@@ -34,7 +34,66 @@ uv pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 
-> **Note:** The CLI scripts (`scripts/transform_slopal.py`, `scripts/benchmark.py`) require the full RunPod environment and cannot be run locally — they import `datasets`, `lhotse`, and `torch` which are not in `requirements-dev.txt`. Run them only on the pod.
+> **Note:** `scripts/benchmark.py` requires a GPU and NeMo — run it only on the pod. `scripts/transform_slopal.py` can be run locally (see below).
+
+## Running the dataset transform locally
+
+The transform script streams data from HuggingFace — no need to download the full 60 GB dataset. It uses two passes:
+
+- **Pass 1** — streams metadata columns only (`snapshot`, `duration`). Parquet column projection skips the audio binary. Builds the full row list and runs stratified sampling.
+- **Pass 2** — streams all columns, decodes audio only for the ~3.5% of rows that were selected.
+
+**Install dependencies** (once, in the same venv):
+
+```bash
+uv pip install datasets "lhotse>=1.30" soundfile
+```
+
+**Run:**
+
+```bash
+python scripts/transform_slopal.py \
+    --output-dir ./slopal_lhotse \
+    --target-hours 100
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--output-dir` | required | Where to write `train/`, `dev/`, `test/` shard folders |
+| `--target-hours` | `100.0` | Hours of audio to select. `-1` = full 2806 h dataset |
+| `--shard-size` | `2000` | Cuts per Shar shard file |
+| `--hf-cache` | none | HuggingFace cache dir (avoids re-downloading parquet on re-run) |
+
+**What to expect:**
+
+```
+>>> Pass 1: streaming metadata (audio column skipped)...
+    50,000 rows scanned (499 h accumulated)...
+    ...
+    ~350,000 segments found (2806 h total).
+>>> Stratified sampling for ~100 h...
+    Selected ~12,500 / ~350,000 segments (3.6%).
+>>> Pass 2: streaming audio for selected segments...
+    1,000 cuts (7.2 h) | skipped 3 | scanned 28,000 rows (8%)
+    ...
+>>> 12,400 valid cuts (100.0 h, 80 filtered out).
+>>> Splitting train/dev/test...
+    train=11,530  (94.0 h)
+    dev=  435     (3.0 h)
+    test= 435     (3.0 h)
+>>> Writing train shards ...
+>>> ALL DONE
+    Output: ./slopal_lhotse
+```
+
+Pass 1 takes ~15–30 min on a home connection (metadata only). Pass 2 takes ~1–2 h depending on network speed. Use `--hf-cache` to skip re-downloading on re-runs.
+
+**Then copy the shards to RunPod** (or run the transform directly on the pod if preferred):
+
+```bash
+rsync -avz --progress ./slopal_lhotse/ root@<pod-ip>:/workspace/slopal_lhotse/
+# or via RunPod's network volume upload, or just re-run transform on the pod
+```
 
 These tests cover text normalisation, audio filtering rules, stratified sampling, and train/dev/test split logic. They run in <5s with no downloads.
 
@@ -124,10 +183,11 @@ pip install -r requirements.txt
 **Run the pipeline:**
 
 ```bash
-# 1. Transform dataset (run once, ~2h on A100)
+# 1. Transform dataset (run once, ~1h on A100 for 100 h subset)
+# Can also be run locally first — see "Running the dataset transform locally" above
 python scripts/transform_slopal.py \
     --output-dir /workspace/slopal_lhotse \
-    --target-hours 500
+    --target-hours 100
 
 # 2. Fine-tune (~6–8h on A100 at max_steps=15000)
 python -m nemo.collections.asr.scripts.speech_to_text_finetune \
