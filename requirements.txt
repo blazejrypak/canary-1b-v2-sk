@@ -1,0 +1,5 @@
+nemo_toolkit[asr]>=2.0
+lhotse>=1.30
+jiwer>=3.0
+datasets>=2.20
+soundfile

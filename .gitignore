@@ -1,0 +1,25 @@
+# Model checkpoints — never commit
+*.nemo
+*.ckpt
+*.pt
+
+# Experiment outputs
+exp/
+
+# Data
+slopal_lhotse/
+wavs/
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+
+# Logs
+*.log
