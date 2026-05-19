@@ -1,3 +1,4 @@
+import hashlib
 from collections import defaultdict
 
 import numpy as np
@@ -47,7 +48,8 @@ def split_cuts(cuts: list, dev_hours: float = 3.0, test_hours: float = 3.0, seed
     rng = np.random.default_rng(seed)
     by_session: dict = defaultdict(list)
     for c in cuts:
-        by_session[hash(c.id) % 1000].append(c)
+        bucket = int(hashlib.md5(c.id.encode()).hexdigest(), 16) % 1000
+        by_session[bucket].append(c)
 
     sessions = list(by_session.keys())
     rng.shuffle(sessions)
