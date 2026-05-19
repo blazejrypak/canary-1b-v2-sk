@@ -1,0 +1,86 @@
+# Fine-tuning config pre Canary-1B-v2 na SloPalSpeech.
+# Spustenie:
+#   python -m nemo.collections.asr.scripts.speech_to_text_finetune \
+#     --config-path=/workspace --config-name=finetune
+
+name: "canary-1b-v2-slovak-parliament"
+
+# Načítaj pretrained Canary v2 — slovenčina je už podporovaná,
+# takže nemeníme tokenizer/decoder, len adaptujeme váhy.
+init_from_pretrained_model:
+  model0:
+    name: "nvidia/canary-1b-v2"
+
+model:
+  sample_rate: 16000
+
+  # --- Tréningové dáta cez Lhotse Shar ---
+  train_ds:
+    use_lhotse: true
+    shar_path: /workspace/slopal_lhotse/train
+    batch_duration: 360          # sekundy audia v batchi (zníž ak OOM)
+    quadratic_duration: 30       # cost = duration + (duration^2 / quadratic)
+    num_workers: 4
+    shuffle: true
+    use_bucketing: true
+    num_buckets: 30
+    bucket_buffer_size: 10000
+    drop_last: false
+
+  validation_ds:
+    use_lhotse: true
+    shar_path: /workspace/slopal_lhotse/dev
+    batch_duration: 360
+    num_workers: 2
+    use_bucketing: true
+    num_buckets: 10
+    shuffle: false
+
+  # --- Optimalizácia ---
+  optim:
+    name: adamw
+    lr: 1.0e-5                   # nízke LR pre adaptáciu, neprepisuj váhy
+    betas: [0.9, 0.98]
+    weight_decay: 1.0e-3
+    sched:
+      name: WarmupAnnealing
+      warmup_steps: 1000
+      min_lr: 1.0e-7
+
+  # --- SpecAugment ---
+  spec_augment:
+    _target_: nemo.collections.asr.modules.SpectrogramAugmentation
+    freq_masks: 2
+    time_masks: 10
+    freq_width: 27
+    time_width: 0.05
+
+# --- Trainer ---
+trainer:
+  devices: 1
+  accelerator: gpu
+  precision: bf16-mixed          # A100/H100. Na starších GPU použi 16-mixed.
+  max_steps: 15000               # ~2-3 epochy na 500 hod pri batch_duration=360
+  log_every_n_steps: 50
+  val_check_interval: 1000       # validate každých 1000 stepov
+  check_val_every_n_epoch: null
+  num_sanity_val_steps: 2
+  enable_progress_bar: true
+  accumulate_grad_batches: 1     # zvýš na 2-4 ak musíš znížiť batch_duration
+  gradient_clip_val: 1.0
+
+# --- Experiment manager ---
+exp_manager:
+  exp_dir: /workspace/exp
+  name: ${name}
+  create_tensorboard_logger: true
+  create_wandb_logger: false
+  create_checkpoint_callback: true
+  checkpoint_callback_params:
+    monitor: val_wer
+    mode: min
+    save_top_k: 3
+    save_last: true
+    every_n_train_steps: 1000
+  resume_if_exists: true         # auto-resume pri restarte podu
+  resume_ignore_no_checkpoint: true
