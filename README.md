@@ -16,6 +16,26 @@ Target: WER improvement on CV21 SK over the pretrained baseline, while tracking
 domain-shift effects on FLEURS (parliamentary speech is a narrow domain;
 FLEURS WER may rise — that's an expected, reportable result, not a bug).
 
+## Local development (Mac)
+
+No GPU needed for local work — the unit tests cover all pure-Python logic.
+
+```bash
+# Install uv (one-time)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Create virtualenv and install package
+uv venv --python 3.11
+source .venv/bin/activate
+uv pip install -e .
+uv pip install -r requirements-dev.txt
+
+# Run tests
+pytest tests/ -v
+```
+
+These tests cover text normalisation, audio filtering rules, stratified sampling, and train/dev/test split logic. They run in <5s with no downloads.
+
 ## Key constraints — read before generating code
 1. Canary-1B-v2 NATIVELY supports Slovak (it's one of 25 languages from the
    Granary pretraining set). Do NOT reinitialize the tokenizer, decoder, or
@@ -50,24 +70,19 @@ FLEURS WER may rise — that's an expected, reportable result, not a bug).
   committed files. The repo contains `.env.example` only.
 
 ## Files I want in this repo
-- `transform_slopal_to_lhotse.py` — converts HF dataset → Lhotse Shar shards
-  with stratified subsampling by year, text normalization (NFC only),
-  filtering (1s≤dur≤40s, 3≤chars/sec≤30), train/dev/test split by session
-  hash to avoid leakage, FLAC encoding inside shards.
-- `finetune.yaml` — NeMo config: `init_from_pretrained_model: nvidia/canary-1b-v2`,
-  Lhotse Shar dataloaders with dynamic bucketing, AdamW lr=1e-5 (low — adaptation,
-  not pretraining), WarmupAnnealing 1000 steps, bf16-mixed, SpecAugment,
-  max_steps=15000, val every 1000 steps monitoring val_wer.
-- `benchmark.py` — loads pretrained or fine-tuned model, runs inference with
-  correct prompt fields on CV21 SK + FLEURS SK, computes WER + CER with
-  consistent normalization on both refs and hyps, prints comparison.
-- `requirements.txt` — `nemo_toolkit[asr]>=2.0`, `lhotse>=1.30`, `jiwer>=3.0`,
-  `datasets>=2.20`, `soundfile`.
-- `.gitignore` — excludes `*.nemo`, `*.ckpt`, `*.pt`, `wavs/`, `slopal_lhotse/`,
-  `exp/`, `.env`, `*.log`, `__pycache__/`.
+- `src/canary_sk/normalize.py` — `normalize_text()` (training, keeps PnC) and `normalize_for_wer()` (benchmark evaluation, lowercase + strip punct).
+- `src/canary_sk/transform.py` — all SloPalSpeech conversion logic: `row_to_cut`, `is_valid`, `stratified_indices`, `split_cuts`. Lhotse imported lazily inside `row_to_cut` so the module is importable on Mac.
+- `src/canary_sk/benchmark.py` — `evaluate_dataset()` used by the benchmark CLI. Only runs on RunPod (requires torch, soundfile, jiwer).
+- `scripts/transform_slopal.py` — thin CLI wrapper: argparse + calls `canary_sk.transform`.
+- `scripts/benchmark.py` — thin CLI wrapper: argparse + calls `canary_sk.benchmark`. Imports NeMo lazily.
+- `tests/` — unit tests for all pure-Python logic. Run with `pytest tests/`.
+- `pyproject.toml` — makes `canary_sk` importable as a package; configures pytest.
+- `finetune.yaml` — NeMo config: `init_from_pretrained_model: nvidia/canary-1b-v2`, Lhotse Shar dataloaders with dynamic bucketing, AdamW lr=1e-5 (low — adaptation, not pretraining), WarmupAnnealing 1000 steps, bf16-mixed, SpecAugment, max_steps=15000, val every 1000 steps monitoring val_wer.
+- `requirements.txt` — RunPod full stack: `nemo_toolkit[asr]>=2.0`, `lhotse>=1.30`, `jiwer>=3.0`, `datasets>=2.20`, `soundfile`.
+- `requirements-dev.txt` — Mac lightweight: `numpy>=1.26`, `pytest>=8.0`.
+- `.gitignore` — excludes `*.nemo`, `*.ckpt`, `*.pt`, `wavs/`, `slopal_lhotse/`, `exp/`, `.env`, `*.log`, `__pycache__/`.
 - `.env.example` — placeholder for `HF_TOKEN=hf_xxxxx`.
-- `README.md` — quickstart for the future me: clone on pod, install deps,
-  three commands (transform / finetune / benchmark), expected costs and times.
+- `README.md` — this file.
 
 ## Style guidelines
 - Python: type hints where they add clarity, not everywhere. Docstrings on
@@ -91,13 +106,24 @@ FLEURS WER may rise — that's an expected, reportable result, not a bug).
 - Cost-impacting suggestions (more epochs, bigger subset, bigger GPU) must
   come with an estimated $ delta. Budget is ~$50 total.
 
-## First task
-Review the three existing files I'll paste (`transform_slopal_to_lhotse.py`,
-`finetune.yaml`, `benchmark.py`). Before suggesting any changes:
-  1. Identify any contradictions with the constraints above.
-  2. Identify anything that would fail on a fresh `nvcr.io/nvidia/nemo:25.04`
-     container with the listed requirements.
-  3. List what's missing for a clean first run end-to-end.
+## Quickstart (RunPod)
 
-Don't rewrite anything yet — first give me your review as a bulleted list,
-then we'll decide what to change.
+Clone the repo to your pod, then run these three commands in order:
+
+```bash
+# 1. Transform dataset (run once, ~2h on A100)
+python scripts/transform_slopal.py \
+    --output-dir /workspace/slopal_lhotse \
+    --target-hours 500
+
+# 2. Fine-tune (~6–8h on A100 at max_steps=15000)
+python -m nemo.collections.asr.scripts.speech_to_text_finetune \
+    --config-path=/workspace/canary-1b-v2-sk \
+    --config-name=finetune
+
+# 3. Benchmark (pretrained baseline vs fine-tuned)
+python scripts/benchmark.py --pretrained nvidia/canary-1b-v2
+python scripts/benchmark.py --model /workspace/exp/canary-1b-v2-slovak-parliament/checkpoints/best.nemo
+```
+
+Expected cost at current RunPod A100 rates (~$2.50/h): ~$30 total.
