@@ -93,16 +93,14 @@ python scripts/transform_slopal.py \
 
 **Expected output:**
 ```
->>> Loading SloPalSpeech metadata...
-    ~350,000 segments loaded.
->>> Stratified sampling for ~500 hours...
-    Selected ~70,000 / ~350,000 segments.
->>> Building cuts...
->>> Splitting train/dev/test...
-    train=~69,000 (494.0h)
-    dev=  ~430   (3.0h)
-    test= ~430   (3.0h)
->>> Writing train shards...
+>>> Pass 1: streaming metadata (audio column skipped)...
+    ~350,000 segments found (~2806 h total).
+>>> Stratified sampling for ~100.0 h...
+    Selected ~12,000 / ~350,000 segments (3.5%).
+>>> Computing train/dev/test assignment...
+    train=~11,100 (94.0 h)  dev=~430 (3.0 h)  test=~430 (3.0 h)
+>>> Pass 2: streaming audio and writing shards...
+>>> 11,500 valid cuts written (N filtered out).
 >>> ALL DONE
     Output: /workspace/slopal_lhotse
 ```
@@ -228,9 +226,6 @@ ls -lt /workspace/exp/canary-1b-v2-slovak-parliament/checkpoints/ | head -5
 ## 8. Known Issues and Warnings
 
 These were found during code review — none are blockers, but good to know:
-
-**`--num-jobs` argument in transform_slopal.py is unused.**
-The dataset transformation runs single-threaded. The argument is parsed but never applied. On A100 this still completes in ~2h. If it's too slow, the fix would be to parallelize `row_to_cut` calls with `multiprocessing.Pool`.
 
 **`batch_size` passed to `model.transcribe()` in benchmark.**
 `src/canary_sk/benchmark.py` passes `batch_size=batch_size` to `model.transcribe()`. In NeMo 2.0 `EncDecMultiTaskModel`, this parameter is accepted but may conflict with the manual batching already done in the loop (each `batch` passed in is already `batch_size` items). If you see a TypeError mentioning `batch_size`, remove it from the `transcribe()` call — the external batching is sufficient.
