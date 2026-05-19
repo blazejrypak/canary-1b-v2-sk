@@ -34,6 +34,8 @@ uv pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 
+> **Note:** The CLI scripts (`scripts/transform_slopal.py`, `scripts/benchmark.py`) require the full RunPod environment and cannot be run locally — they import `datasets`, `lhotse`, and `torch` which are not in `requirements-dev.txt`. Run them only on the pod.
+
 These tests cover text normalisation, audio filtering rules, stratified sampling, and train/dev/test split logic. They run in <5s with no downloads.
 
 ## Key constraints — read before generating code
@@ -108,7 +110,18 @@ These tests cover text normalisation, audio filtering rules, stratified sampling
 
 ## Quickstart (RunPod)
 
-Clone the repo to your pod, then run these three commands in order:
+**Pod setup (one-time):**
+
+```bash
+# 1. Clone the repo (replace with your GitHub URL)
+git clone git@github.com:<your-org>/canary-1b-v2-sk.git /workspace/canary-1b-v2-sk
+cd /workspace/canary-1b-v2-sk
+
+# 2. Install dependencies (lhotse, jiwer, datasets on top of the NeMo base image)
+pip install -r requirements.txt
+```
+
+**Run the pipeline:**
 
 ```bash
 # 1. Transform dataset (run once, ~2h on A100)
@@ -123,7 +136,9 @@ python -m nemo.collections.asr.scripts.speech_to_text_finetune \
 
 # 3. Benchmark (pretrained baseline vs fine-tuned)
 python scripts/benchmark.py --pretrained nvidia/canary-1b-v2
-python scripts/benchmark.py --model /workspace/exp/canary-1b-v2-slovak-parliament/checkpoints/best.nemo
+# List available checkpoints: ls /workspace/exp/canary-1b-v2-slovak-parliament/checkpoints/
+python scripts/benchmark.py \
+    --model /workspace/exp/canary-1b-v2-slovak-parliament/checkpoints/<best-checkpoint>.nemo
 ```
 
 Expected cost at current RunPod A100 rates (~$2.50/h): ~$30 total.

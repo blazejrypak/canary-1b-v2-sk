@@ -1,7 +1,7 @@
 # Fine-tuning config pre Canary-1B-v2 na SloPalSpeech.
 # Spustenie:
 #   python -m nemo.collections.asr.scripts.speech_to_text_finetune \
-#     --config-path=/workspace --config-name=finetune
+#     --config-path=/workspace/canary-1b-v2-sk --config-name=finetune
 
 name: "canary-1b-v2-slovak-parliament"
 
