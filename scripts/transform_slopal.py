@@ -21,6 +21,7 @@ Usage:
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from datasets import Audio as HFAudio, load_dataset
@@ -164,6 +165,9 @@ def main():
                 continue
             split = split_assignment[i]
             writers[split].write(cut)
+            tmp = (cut.custom or {}).pop("_tmp_path", None)
+            if tmp:
+                os.unlink(tmp)
             written[split] += 1
             written_hrs[split] += cut.duration
             total_written = sum(written.values())

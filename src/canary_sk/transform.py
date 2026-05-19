@@ -131,7 +131,17 @@ def row_to_cut(row: dict):
 
     cut_id = f"slopal_{row['id']}"
 
-    recording = Recording.from_array(audio_array, sampling_rate=sr, recording_id=cut_id)
+    tmp_path = None
+    if hasattr(Recording, "from_array"):
+        recording = Recording.from_array(audio_array, sampling_rate=sr, recording_id=cut_id)
+    else:
+        import os, tempfile
+        import soundfile as sf
+        fd, tmp_path = tempfile.mkstemp(suffix=".flac")
+        os.close(fd)
+        sf.write(tmp_path, audio_array, sr)
+        recording = Recording.from_file(tmp_path, recording_id=cut_id)
+
     supervision = SupervisionSegment(
         id=cut_id,
         recording_id=cut_id,
@@ -148,5 +158,6 @@ def row_to_cut(row: dict):
         recording=recording,
         supervisions=[supervision],
     )
-    cut.custom = {"source_lang": "sk", "target_lang": "sk", "task": "asr", "pnc": "yes"}
+    cut.custom = {"source_lang": "sk", "target_lang": "sk", "task": "asr", "pnc": "yes",
+                  "_tmp_path": tmp_path}
     return cut
